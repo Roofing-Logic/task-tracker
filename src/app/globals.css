@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Priority left-border colors */
+.priority-high { border-left: 3px solid #ef4444; }
+.priority-medium { border-left: 3px solid #f59e0b; }
+.priority-low { border-left: 3px solid #22c55e; }
+
+/* Status badges */
+.status-todo { background: #334155; color: #94a3b8; }
+.status-in-progress { background: #1e3a5f; color: #60a5fa; }
+.status-review { background: #3b1f6e; color: #a78bfa; }
+.status-blocked { background: #5c1a1a; color: #f87171; }
+.status-done { background: #14532d; color: #4ade80; }
+
+/* Type badges */
+.type-bug { background: #5c1a1a; color: #f87171; }
+.type-feature { background: #1e3a5f; color: #60a5fa; }
+.type-enhancement { background: #3b1f6e; color: #a78bfa; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }

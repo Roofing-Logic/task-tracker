@@ -1,0 +1,713 @@
+'use client';
+
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { DevTask, PROJECTS, STATUSES, STATUS_LABELS } from '@/lib/types';
+
+function getProjectById(id: string) {
+  return PROJECTS.find((p) => p.id === id) || { id, name: id, color: '#64748b' };
+}
+
+function getTypeClass(type: string | null) {
+  if (!type) return '';
+  if (type.startsWith('Bug')) return 'type-bug';
+  if (type === 'Feature Gap') return 'type-feature';
+  if (type === 'Enhancement') return 'type-enhancement';
+  return '';
+}
+
+export default function Home() {
+  const [tasks, setTasks] = useState<DevTask[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [syncStatus, setSyncStatus] = useState('Loading...');
+  const [view, setView] = useState<'board' | 'list'>('board');
+  const [search, setSearch] = useState('');
+  const [filters, setFilters] = useState({ sprint: 'all', priority: 'all', area: 'all' });
+  const [sortField, setSortField] = useState('id');
+  const [sortAsc, setSortAsc] = useState(true);
+  const [modalTask, setModalTask] = useState<DevTask | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // Load tasks
+  const loadTasks = useCallback(async () => {
+    try {
+      const res = await fetch('/api/tasks');
+      if (!res.ok) throw new Error('Failed to load');
+      const data = await res.json();
+      setTasks(data);
+      setSyncStatus('Connected');
+    } catch {
+      setSyncStatus('Error');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadTasks();
+    const interval = setInterval(loadTasks, 30000);
+    return () => clearInterval(interval);
+  }, [loadTasks]);
+
+  // Filter tasks
+  const areas = useMemo(
+    () => [...new Set(tasks.map((t) => t.area).filter(Boolean))].sort() as string[],
+    [tasks]
+  );
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return tasks.filter((t) => {
+      if (filters.sprint !== 'all' && t.sprint !== filters.sprint) return false;
+      if (filters.priority !== 'all' && t.priority !== filters.priority) return false;
+      if (filters.area !== 'all' && t.area !== filters.area) return false;
+      if (
+        q &&
+        !t.title.toLowerCase().includes(q) &&
+        !t.id.toLowerCase().includes(q) &&
+        !(t.description || '').toLowerCase().includes(q)
+      )
+        return false;
+      return true;
+    });
+  }, [tasks, search, filters]);
+
+  // Stats
+  const stats = useMemo(() => {
+    const total = filtered.length;
+    const done = filtered.filter((t) => t.status === 'done').length;
+    const inProg = filtered.filter((t) => t.status === 'in-progress').length;
+    const inReview = filtered.filter((t) => t.status === 'review').length;
+    const blocked = filtered.filter((t) => t.status === 'blocked').length;
+    const high = filtered.filter((t) => t.priority === 'high' && t.status !== 'done').length;
+    const totalHours = filtered.reduce((s, t) => s + (t.est_hours || 0), 0);
+    return { total, done, inProg, inReview, blocked, high, totalHours };
+  }, [filtered]);
+
+  // Sort for list view
+  const sorted = useMemo(() => {
+    return [...filtered].sort((a, b) => {
+      const va = String((a as unknown as Record<string, unknown>)[sortField] ?? '');
+      const vb = String((b as unknown as Record<string, unknown>)[sortField] ?? '');
+      const cmp = String(va).toLowerCase().localeCompare(String(vb).toLowerCase());
+      return sortAsc ? cmp : -cmp;
+    });
+  }, [filtered, sortField, sortAsc]);
+
+  // CRUD
+  async function saveTask(task: DevTask) {
+    setSaving(true);
+    try {
+      const res = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(task),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert('Save failed: ' + err.error);
+        return;
+      }
+      const saved = await res.json();
+      setTasks((prev) => {
+        const idx = prev.findIndex((t) => t.id === saved.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = saved;
+          return next;
+        }
+        return [...prev, saved];
+      });
+      setModalOpen(false);
+      setSyncStatus('Saved');
+      setTimeout(() => setSyncStatus('Connected'), 2000);
+    } catch {
+      alert('Save failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteTask(id: string) {
+    if (!confirm('Delete this task?')) return;
+    try {
+      const res = await fetch(`/api/tasks?id=${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error();
+      setTasks((prev) => prev.filter((t) => t.id !== id));
+      setModalOpen(false);
+      setSyncStatus('Deleted');
+      setTimeout(() => setSyncStatus('Connected'), 2000);
+    } catch {
+      alert('Delete failed');
+    }
+  }
+
+  function handleSort(field: string) {
+    if (sortField === field) setSortAsc(!sortAsc);
+    else {
+      setSortField(field);
+      setSortAsc(true);
+    }
+  }
+
+  function openNew() {
+    setModalTask(null);
+    setModalOpen(true);
+  }
+
+  function openEdit(task: DevTask) {
+    setModalTask(task);
+    setModalOpen(true);
+  }
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setModalOpen(false);
+      if (
+        e.key === 'n' &&
+        !modalOpen &&
+        !['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName)
+      ) {
+        e.preventDefault();
+        openNew();
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [modalOpen]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-lg text-gray-400">Loading tasks...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen p-4 md:p-6">
+      {/* Header */}
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl font-bold">RoofingLogic Task Tracker</h1>
+          <span
+            className={`text-xs px-2 py-1 rounded-full ${
+              syncStatus === 'Connected'
+                ? 'bg-green-900/50 text-green-400'
+                : syncStatus === 'Error'
+                  ? 'bg-red-900/50 text-red-400'
+                  : 'bg-yellow-900/50 text-yellow-400'
+            }`}
+          >
+            {syncStatus}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            placeholder="Search tasks..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm w-48 focus:outline-none focus:border-blue-500"
+          />
+          <button
+            onClick={openNew}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors"
+          >
+            + New Task
+          </button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="flex gap-1">
+          {['board', 'list'].map((v) => (
+            <button
+              key={v}
+              onClick={() => setView(v as 'board' | 'list')}
+              className={`px-3 py-1 rounded text-sm capitalize ${
+                view === v ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
+        <div className="h-4 w-px bg-gray-700" />
+        <div className="flex gap-1">
+          {['all', 'Sprint 7', 'Sprint 8', 'Sprint 9'].map((s) => (
+            <button
+              key={s}
+              onClick={() => setFilters((f) => ({ ...f, sprint: s }))}
+              className={`px-2 py-1 rounded text-xs ${
+                filters.sprint === s ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-white'
+              }`}
+            >
+              {s === 'all' ? 'All Sprints' : s}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-1">
+          {['all', 'high', 'medium', 'low'].map((p) => (
+            <button
+              key={p}
+              onClick={() => setFilters((f) => ({ ...f, priority: p }))}
+              className={`px-2 py-1 rounded text-xs capitalize ${
+                filters.priority === p
+                  ? p === 'high'
+                    ? 'bg-red-600 text-white'
+                    : p === 'medium'
+                      ? 'bg-yellow-600 text-white'
+                      : p === 'low'
+                        ? 'bg-green-600 text-white'
+                        : 'bg-blue-600 text-white'
+                  : 'bg-gray-800 text-gray-400 hover:text-white'
+              }`}
+            >
+              {p === 'all' ? 'All Priority' : p}
+            </button>
+          ))}
+        </div>
+        <select
+          value={filters.area}
+          onChange={(e) => setFilters((f) => ({ ...f, area: e.target.value }))}
+          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs"
+        >
+          <option value="all">All Areas</option>
+          {areas.map((a) => (
+            <option key={a} value={a}>
+              {a}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Stats */}
+      <div className="flex flex-wrap gap-4 mb-5 text-sm text-gray-400">
+        <span>
+          <span className="text-white font-semibold">{stats.total}</span> total
+        </span>
+        <span>
+          <span className="text-green-400 font-semibold">{stats.done}</span> done
+        </span>
+        <span>
+          <span className="text-blue-400 font-semibold">{stats.inProg}</span> in progress
+        </span>
+        <span>
+          <span className="text-purple-400 font-semibold">{stats.inReview}</span> in review
+        </span>
+        <span>
+          <span className="text-red-400 font-semibold">{stats.blocked}</span> blocked
+        </span>
+        <span>
+          <span className="text-orange-400 font-semibold">{stats.high}</span> high priority open
+        </span>
+        <span>
+          <span className="text-white font-semibold">{stats.totalHours}</span> est. hours
+        </span>
+      </div>
+
+      {/* Board View */}
+      {view === 'board' && (
+        <div className="flex gap-4 overflow-x-auto pb-4">
+          {STATUSES.map((status) => {
+            const col = filtered.filter((t) => t.status === status);
+            return (
+              <div key={status} className="min-w-[280px] flex-1">
+                <div className="flex items-center justify-between mb-3 px-1">
+                  <h3 className="font-semibold text-sm text-gray-300">{STATUS_LABELS[status]}</h3>
+                  <span className="text-xs bg-gray-800 px-2 py-0.5 rounded-full text-gray-400">
+                    {col.length}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {col.map((task) => {
+                    const proj = getProjectById(task.project);
+                    return (
+                      <div
+                        key={task.id}
+                        onClick={() => openEdit(task)}
+                        className={`bg-gray-900 border border-gray-800 rounded-lg p-3 cursor-pointer hover:border-gray-600 transition-colors priority-${task.priority}`}
+                      >
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span
+                            className="text-xs px-1.5 py-0.5 rounded"
+                            style={{
+                              background: `${proj.color}20`,
+                              color: proj.color,
+                            }}
+                          >
+                            {proj.name}
+                          </span>
+                          <span className="text-xs text-gray-500">{task.sprint || ''}</span>
+                        </div>
+                        {task.area && (
+                          <div className="text-xs text-gray-500 mb-1">{task.area}</div>
+                        )}
+                        <div className="text-sm font-medium mb-2">{task.title}</div>
+                        <div className="flex items-center justify-between text-xs text-gray-500">
+                          <span>#{task.id}</span>
+                          <div className="flex items-center gap-2">
+                            {task.type && (
+                              <span
+                                className={`px-1.5 py-0.5 rounded ${getTypeClass(task.type)}`}
+                              >
+                                {task.type}
+                              </span>
+                            )}
+                            {task.assignee && <span>{task.assignee}</span>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* List View */}
+      {view === 'list' && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-400 border-b border-gray-800">
+                {[
+                  { key: 'id', label: 'ID' },
+                  { key: 'sprint', label: 'Sprint' },
+                  { key: 'area', label: 'Area' },
+                  { key: 'title', label: 'Title' },
+                  { key: 'type', label: 'Type' },
+                  { key: 'priority', label: 'Priority' },
+                  { key: 'status', label: 'Status' },
+                  { key: 'assignee', label: 'Assignee' },
+                ].map((col) => (
+                  <th
+                    key={col.key}
+                    onClick={() => handleSort(col.key)}
+                    className="py-2 px-3 cursor-pointer hover:text-white text-xs font-medium"
+                  >
+                    {col.label} {sortField === col.key ? (sortAsc ? '▲' : '▼') : ''}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((task) => (
+                <tr
+                  key={task.id}
+                  onClick={() => openEdit(task)}
+                  className="border-b border-gray-800/50 hover:bg-gray-900 cursor-pointer"
+                >
+                  <td className="py-2 px-3 text-gray-500">#{task.id}</td>
+                  <td className="py-2 px-3">{task.sprint || ''}</td>
+                  <td className="py-2 px-3 whitespace-nowrap">{task.area || ''}</td>
+                  <td className="py-2 px-3">{task.title}</td>
+                  <td className="py-2 px-3">
+                    {task.type && (
+                      <span className={`px-1.5 py-0.5 rounded text-xs ${getTypeClass(task.type)}`}>
+                        {task.type}
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2 px-3">
+                    <span
+                      className={
+                        task.priority === 'high'
+                          ? 'text-red-400'
+                          : task.priority === 'medium'
+                            ? 'text-yellow-400'
+                            : 'text-green-400'
+                      }
+                    >
+                      {task.priority}
+                    </span>
+                  </td>
+                  <td className="py-2 px-3">
+                    <span
+                      className={`px-2 py-0.5 rounded text-xs status-${task.status}`}
+                    >
+                      {task.status}
+                    </span>
+                  </td>
+                  <td className="py-2 px-3">{task.assignee || ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Modal */}
+      {modalOpen && (
+        <TaskModal
+          task={modalTask}
+          saving={saving}
+          onSave={saveTask}
+          onDelete={deleteTask}
+          onClose={() => setModalOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ------- Task Modal -------
+
+function TaskModal({
+  task,
+  saving,
+  onSave,
+  onDelete,
+  onClose,
+}: {
+  task: DevTask | null;
+  saving: boolean;
+  onSave: (t: DevTask) => void;
+  onDelete: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [form, setForm] = useState<DevTask>(
+    task || {
+      id: '',
+      title: '',
+      description: '',
+      project: 'crm',
+      priority: 'medium',
+      status: 'todo',
+      assignee: '',
+      created: new Date().toISOString().split('T')[0],
+      completed: '',
+      sprint: 'Sprint 8',
+      area: 'Calc Engine',
+      type: 'Enhancement',
+      blocked_by: '',
+      est_hours: 0,
+      notes: '',
+      updated_at: '',
+    }
+  );
+
+  function set(field: string, value: string | number) {
+    setForm((f) => ({ ...f, [field]: value }));
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const data = { ...form };
+    if (!data.id) {
+      data.id =
+        'S' +
+        (data.sprint || '').replace('Sprint ', '') +
+        '-' +
+        String(Date.now()).slice(-3);
+    }
+    onSave(data);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <form
+        onSubmit={handleSubmit}
+        className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6"
+      >
+        <h2 className="text-lg font-semibold mb-4">
+          {task ? 'Edit Task' : 'New Task'}
+        </h2>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Title *</label>
+            <input
+              required
+              autoFocus
+              value={form.title}
+              onChange={(e) => set('title', e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Description</label>
+            <textarea
+              value={form.description || ''}
+              onChange={(e) => set('description', e.target.value)}
+              rows={3}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 resize-none"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Project</label>
+              <select
+                value={form.project}
+                onChange={(e) => set('project', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm"
+              >
+                {PROJECTS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Sprint</label>
+              <select
+                value={form.sprint || ''}
+                onChange={(e) => set('sprint', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm"
+              >
+                {['Sprint 7', 'Sprint 8', 'Sprint 9', 'Sprint 10'].map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Area</label>
+              <input
+                value={form.area || ''}
+                onChange={(e) => set('area', e.target.value)}
+                placeholder="e.g. Calc Engine"
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Type</label>
+              <select
+                value={form.type || ''}
+                onChange={(e) => set('type', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm"
+              >
+                {['Enhancement', 'Bug Fix', 'Bug (Critical)', 'Feature Gap', 'Refactor', 'Documentation'].map(
+                  (t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  )
+                )}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Priority</label>
+              <select
+                value={form.priority}
+                onChange={(e) => set('priority', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm"
+              >
+                {['high', 'medium', 'low'].map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Status</label>
+              <select
+                value={form.status}
+                onChange={(e) => set('status', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm"
+              >
+                {STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {STATUS_LABELS[s]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Est. Hours</label>
+              <input
+                type="number"
+                min={0}
+                step={0.5}
+                value={form.est_hours}
+                onChange={(e) => set('est_hours', parseFloat(e.target.value) || 0)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Assignee</label>
+              <input
+                value={form.assignee}
+                onChange={(e) => set('assignee', e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">Blocked By</label>
+              <input
+                value={form.blocked_by}
+                onChange={(e) => set('blocked_by', e.target.value)}
+                placeholder="Task ID"
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Notes</label>
+            <textarea
+              value={form.notes}
+              onChange={(e) => set('notes', e.target.value)}
+              rows={2}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 resize-none"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between mt-6">
+          <div>
+            {task && (
+              <button
+                type="button"
+                onClick={() => onDelete(task.id)}
+                className="text-red-400 hover:text-red-300 text-sm"
+              >
+                Delete
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm text-gray-400 hover:text-white"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium"
+            >
+              {saving ? 'Saving...' : task ? 'Update' : 'Create'}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+}
