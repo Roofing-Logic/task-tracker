@@ -21,7 +21,7 @@ export default function Home() {
   const [syncStatus, setSyncStatus] = useState('Loading...');
   const [view, setView] = useState<'board' | 'list'>('board');
   const [search, setSearch] = useState('');
-  const [filters, setFilters] = useState({ sprint: 'all', priority: 'all', area: 'all' });
+  const [filters, setFilters] = useState({ sprint: 'all', priority: 'all', area: 'all', project: 'all' });
   const [sortField, setSortField] = useState('id');
   const [sortAsc, setSortAsc] = useState(true);
   const [modalTask, setModalTask] = useState<DevTask | null>(null);
@@ -61,6 +61,7 @@ export default function Home() {
       if (filters.sprint !== 'all' && t.sprint !== filters.sprint) return false;
       if (filters.priority !== 'all' && t.priority !== filters.priority) return false;
       if (filters.area !== 'all' && t.area !== filters.area) return false;
+      if (filters.project !== 'all' && t.project !== filters.project) return false;
       if (
         q &&
         !t.title.toLowerCase().includes(q) &&
@@ -279,6 +280,18 @@ export default function Home() {
           {areas.map((a) => (
             <option key={a} value={a}>
               {a}
+            </option>
+          ))}
+        </select>
+        <select
+          value={filters.project}
+          onChange={(e) => setFilters((f) => ({ ...f, project: e.target.value }))}
+          className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs"
+        >
+          <option value="all">All Projects</option>
+          {PROJECTS.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
             </option>
           ))}
         </select>
