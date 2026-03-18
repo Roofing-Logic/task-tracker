@@ -298,6 +298,10 @@ export default function Home() {
           {PROJECTS.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
+            </option>
+          ))}
+        </select>
+        <select
           value={filters.assignee}
           onChange={(e) => setFilters((f) => ({ ...f, assignee: e.target.value }))}
           className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs"
