@@ -15,6 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "RoofingLogic Task Tracker",
   description: "Development task tracker for RoofingLogic projects",
+  icons: { icon: "/icon.svg" },
 };
 
 export default function RootLayout({
