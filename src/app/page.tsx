@@ -33,6 +33,7 @@ export default function Home() {
   const [subFilter, setSubFilter] = useState('all');
   const [expandedSubId, setExpandedSubId] = useState<string | null>(null);
   const [subActioning, setSubActioning] = useState<string | null>(null);
+  const [acceptingSubmission, setAcceptingSubmission] = useState<FeatureSubmission | null>(null);
 
   const loadSubmissions = useCallback(async () => {
     try {
@@ -178,6 +179,14 @@ export default function Home() {
         }
         return [...prev, saved];
       });
+      // If this was an accepted submission, link the task to it
+      if (acceptingSubmission) {
+        await updateSubmission(acceptingSubmission.id, {
+          status: 'accepted',
+          linked_task_id: saved.id,
+        });
+        setAcceptingSubmission(null);
+      }
       setModalOpen(false);
       setSyncStatus('Saved');
       setTimeout(() => setSyncStatus('Connected'), 2000);
@@ -211,12 +220,45 @@ export default function Home() {
   }
 
   function openNew() {
+    setAcceptingSubmission(null);
     setModalTask(null);
     setModalOpen(true);
   }
 
   function openEdit(task: DevTask) {
+    setAcceptingSubmission(null);
     setModalTask(task);
+    setModalOpen(true);
+  }
+
+  function acceptSubmission(sub: FeatureSubmission) {
+    // Map submission type to task type
+    const typeMap: Record<string, string> = {
+      bug: 'Bug Fix',
+      feature: 'Feature Gap',
+      improvement: 'Enhancement',
+    };
+    // Pre-fill a new task from the submission
+    const prefilled: DevTask = {
+      id: '',
+      title: sub.title,
+      description: sub.description + (sub.submitted_by_name ? `\n\nSubmitted by: ${sub.submitted_by_name}` : '') + (sub.submitted_by_email ? ` (${sub.submitted_by_email})` : ''),
+      project: 'crm',
+      priority: 'medium',
+      status: 'todo',
+      assignee: '',
+      created: new Date().toISOString().split('T')[0],
+      completed: '',
+      sprint: 'Sprint 8',
+      area: '',
+      type: typeMap[sub.type] || 'Enhancement',
+      blocked_by: '',
+      est_hours: 0,
+      notes: '',
+      updated_at: '',
+    };
+    setAcceptingSubmission(sub);
+    setModalTask(prefilled);
     setModalOpen(true);
   }
 
@@ -666,7 +708,7 @@ export default function Home() {
                                 {subActioning === sub.id ? 'Updating...' : 'Mark Reviewed'}
                               </button>
                               <button
-                                onClick={() => updateSubmission(sub.id, { status: 'accepted' })}
+                                onClick={() => acceptSubmission(sub)}
                                 disabled={subActioning === sub.id}
                                 className="rounded-lg bg-green-600 hover:bg-green-700 px-4 py-2 text-xs font-medium text-white transition-colors disabled:opacity-50"
                               >
@@ -684,7 +726,7 @@ export default function Home() {
                           {sub.status === 'reviewed' && (
                             <>
                               <button
-                                onClick={() => updateSubmission(sub.id, { status: 'accepted' })}
+                                onClick={() => acceptSubmission(sub)}
                                 disabled={subActioning === sub.id}
                                 className="rounded-lg bg-green-600 hover:bg-green-700 px-4 py-2 text-xs font-medium text-white transition-colors disabled:opacity-50"
                               >
@@ -727,7 +769,8 @@ export default function Home() {
           sprints={sprints}
           onSave={saveTask}
           onDelete={deleteTask}
-          onClose={() => setModalOpen(false)}
+          onClose={() => { setModalOpen(false); setAcceptingSubmission(null); }}
+          isAccepting={!!acceptingSubmission}
         />
       )}
     </div>
@@ -743,6 +786,7 @@ function TaskModal({
   onSave,
   onDelete,
   onClose,
+  isAccepting,
 }: {
   task: DevTask | null;
   saving: boolean;
@@ -750,6 +794,7 @@ function TaskModal({
   onSave: (t: DevTask) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
+  isAccepting?: boolean;
 }) {
   const [addingSprint, setAddingSprint] = useState(false);
   const [newSprintNum, setNewSprintNum] = useState('');
@@ -803,7 +848,7 @@ function TaskModal({
         className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6"
       >
         <h2 className="text-lg font-semibold mb-4">
-          {task ? 'Edit Task' : 'New Task'}
+          {isAccepting ? 'Accept Submission → Create Task' : task && task.id ? 'Edit Task' : 'New Task'}
         </h2>
 
         <div className="space-y-3">
@@ -1015,7 +1060,7 @@ function TaskModal({
 
         <div className="flex items-center justify-between mt-6">
           <div>
-            {task && (
+            {task && task.id && !isAccepting && (
               <button
                 type="button"
                 onClick={() => onDelete(task.id)}
@@ -1038,7 +1083,7 @@ function TaskModal({
               disabled={saving}
               className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium"
             >
-              {saving ? 'Saving...' : task ? 'Update' : 'Create'}
+              {saving ? 'Saving...' : isAccepting ? 'Accept & Create' : task && task.id ? 'Update' : 'Create'}
             </button>
           </div>
         </div>
