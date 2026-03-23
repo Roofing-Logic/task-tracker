@@ -632,6 +632,23 @@ export default function Home() {
                           </div>
                         )}
 
+                        {sub.image_urls && sub.image_urls.length > 0 && (
+                          <div>
+                            <p className="mb-1 text-xs font-medium uppercase tracking-wide text-gray-500">Screenshots</p>
+                            <div className="flex gap-2">
+                              {sub.image_urls.map((url: string, i: number) => (
+                                <a key={i} href={url} target="_blank" rel="noopener noreferrer">
+                                  <img
+                                    src={url}
+                                    alt={`Attachment ${i + 1}`}
+                                    className="h-24 w-24 rounded-lg border border-gray-700 object-cover hover:border-blue-500 transition-colors"
+                                  />
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         {sub.linked_task_id && (
                           <div className="text-xs text-gray-500">
                             Linked to task: <span className="text-blue-400">{sub.linked_task_id}</span>

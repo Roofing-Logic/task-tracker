@@ -1,8 +1,11 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useState, useRef, type FormEvent, type ChangeEvent } from 'react';
 
 type RequestType = 'bug' | 'feature' | 'improvement';
+
+const MAX_FILES = 3;
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
 export default function SubmitPage() {
   const [form, setForm] = useState({
@@ -14,6 +17,9 @@ export default function SubmitPage() {
     submitted_by_phone: '',
     honeypot: '',
   });
+  const [files, setFiles] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -40,6 +46,45 @@ export default function SubmitPage() {
     setFieldErrors(prev => ({ ...prev, [field]: err || '' }));
   }
 
+  function handleFiles(e: ChangeEvent<HTMLInputElement>) {
+    const selected = Array.from(e.target.files || []);
+    const combined = [...files, ...selected].slice(0, MAX_FILES);
+
+    // Validate each file
+    for (const f of selected) {
+      if (!['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(f.type)) {
+        setErrorMsg(`"${f.name}" is not a supported image type. Use JPEG, PNG, GIF, or WebP.`);
+        return;
+      }
+      if (f.size > MAX_FILE_SIZE) {
+        setErrorMsg(`"${f.name}" exceeds the 5MB size limit.`);
+        return;
+      }
+    }
+
+    setErrorMsg('');
+    setFiles(combined);
+
+    // Generate previews
+    const newPreviews: string[] = [];
+    combined.forEach(f => {
+      const url = URL.createObjectURL(f);
+      newPreviews.push(url);
+    });
+    // Revoke old preview URLs
+    previews.forEach(url => URL.revokeObjectURL(url));
+    setPreviews(newPreviews);
+
+    // Reset input so same file can be re-selected
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  function removeFile(index: number) {
+    URL.revokeObjectURL(previews[index]);
+    setFiles(f => f.filter((_, i) => i !== index));
+    setPreviews(p => p.filter((_, i) => i !== index));
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setStatus('submitting');
@@ -61,10 +106,19 @@ export default function SubmitPage() {
     }
 
     try {
+      const fd = new FormData();
+      fd.append('type', form.type);
+      fd.append('title', form.title);
+      fd.append('description', form.description);
+      fd.append('submitted_by_name', form.submitted_by_name);
+      fd.append('submitted_by_email', form.submitted_by_email);
+      fd.append('submitted_by_phone', form.submitted_by_phone);
+      fd.append('honeypot', form.honeypot);
+      files.forEach(f => fd.append('images', f));
+
       const res = await fetch('/api/submit', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: fd,
       });
       if (!res.ok) {
         const data = await res.json();
@@ -94,6 +148,9 @@ export default function SubmitPage() {
             onClick={() => {
               setStatus('idle');
               setForm({ type: 'feature', title: '', description: '', submitted_by_name: '', submitted_by_email: '', submitted_by_phone: '', honeypot: '' });
+              setFiles([]);
+              previews.forEach(url => URL.revokeObjectURL(url));
+              setPreviews([]);
               setFieldErrors({});
               setTouched({});
             }}
@@ -220,6 +277,54 @@ export default function SubmitPage() {
             )}
           </div>
 
+          {/* Image upload */}
+          <div>
+            <p className="mb-2 text-sm font-medium">
+              Screenshots <span className="text-xs text-gray-500">(optional, up to 3 images, 5MB each)</span>
+            </p>
+
+            {/* Preview thumbnails */}
+            {previews.length > 0 && (
+              <div className="mb-3 flex gap-3">
+                {previews.map((url, i) => (
+                  <div key={i} className="relative group">
+                    <img
+                      src={url}
+                      alt={`Preview ${i + 1}`}
+                      className="h-20 w-20 rounded-lg border border-gray-700 object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeFile(i)}
+                      className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-xs text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      x
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {files.length < MAX_FILES && (
+              <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-gray-700 px-4 py-4 text-sm text-gray-500 hover:border-gray-500 hover:text-gray-400 transition-colors">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <path d="M21 15l-5-5L5 21" />
+                </svg>
+                {files.length === 0 ? 'Add screenshots' : `Add more (${files.length}/${MAX_FILES})`}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/gif,image/webp"
+                  multiple
+                  onChange={handleFiles}
+                  className="hidden"
+                />
+              </label>
+            )}
+          </div>
+
           {/* Contact info */}
           <div>
             <p className="mb-3 text-sm font-medium">
@@ -275,6 +380,11 @@ export default function SubmitPage() {
               <p className="text-sm text-red-400">{errorMsg}</p>
             </div>
           )}
+          {errorMsg && status !== 'error' && (
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3">
+              <p className="text-sm text-red-400">{errorMsg}</p>
+            </div>
+          )}
 
           {/* Submit */}
           <button
@@ -288,7 +398,7 @@ export default function SubmitPage() {
                   <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-25" />
                   <path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="opacity-75" />
                 </svg>
-                Submitting...
+                Uploading...
               </span>
             ) : (
               'Submit Request'
